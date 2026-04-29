@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Collaborative Kanban Board</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.2/Sortable.min.js"></script>
+<style>
+  /* ── Reset & Base ───────────────────────────────────────── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: #0f172a;
+    color: #e2e8f0;
+    min-height: 100vh;
+  }
+
+  /* ── Header ─────────────────────────────────────────────── */
+  header {
+    background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+    border-bottom: 1px solid #334155;
+    padding: 14px 28px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    box-shadow: 0 2px 16px rgba(0,0,0,.4);
+  }
+  .logo { display: flex; align-items: center; gap: 10px; }
+  .logo-icon {
+    width: 36px; height: 36px; background: linear-gradient(135deg,#6366f1,#8b5cf6);
+    border-radius: 8px; display: flex; align-items: center; justify-content: center;
+    font-size: 18px;
+  }
+  header h1 { font-size: 1.2rem; font-weight: 700; color: #f1f5f9; }
+  header p  { font-size: .72rem; color: #94a3b8; margin-top: 1px; }
+
+  .header-right { display: flex; align-items: center; gap: 12px; }
+  .sync-badge {
+    display: flex; align-items: center; gap: 6px;
+    font-size: .72rem; color: #94a3b8; background: #1e293b;
+    border: 1px solid #334155; border-radius: 20px; padding: 4px 10px;
+  }
+  .sync-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: #22c55e; animation: pulse 2s infinite;
+  }
+  .sync-dot.error { background: #ef4444; animation: none; }
+  @keyframes pulse {
+    0%,100% { opacity: 1; } 50% { opacity: .4; }
+  }
+  #add-task-btn {
+    background: linear-gradient(135deg,#6366f1,#8b5cf6);
+    border: none; color: #fff; border-radius: 8px;
+    padding: 8px 16px; font-size: .82rem; font-weight: 600;
+    cursor: pointer; transition: opacity .15s;
+  }
+  #add-task-btn:hover { opacity: .85; }
+
+  /* ── Board ───────────────────────────────────────────────── */
+  .board-wrapper { padding: 24px 28px; overflow-x: auto; }
+  .board {
+    display: flex; gap: 20px; min-width: 780px;
+  }
+  .column {
+    flex: 1; background: #1e293b; border-radius: 14px;
+    border: 1px solid #334155; display: flex; flex-direction: column;
+    min-height: 480px; overflow: hidden;
+  }
+  .col-header {
+    padding: 14px 16px; display: flex; align-items: center; gap: 8px;
+    border-bottom: 1px solid #334155;
+  }
+  .col-dot {
+    width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+  }
+  .col-dot.backlog    { background: #94a3b8; }
+  .col-dot.inprogress { background: #f59e0b; }
+  .col-dot.done       { background: #22c55e; }
+  .col-title { font-weight: 700; font-size: .9rem; color: #f1f5f9; }
+  .col-count {
+    margin-left: auto; background: #0f172a; color: #94a3b8;
+    border-radius: 10px; padding: 2px 8px; font-size: .72rem; font-weight: 600;
+  }
+
+  .cards-list {
+    padding: 12px; flex: 1; display: flex; flex-direction: column; gap: 10px;
+    min-height: 60px;
+  }
+
+  /* ── Card ────────────────────────────────────────────────── */
+  .card {
+    background: #0f172a; border: 1px solid #334155; border-radius: 10px;
+    padding: 12px 14px; cursor: grab; transition: box-shadow .15s, border-color .15s;
+    position: relative;
+  }
+  .card:active { cursor: grabbing; }
+  .card:hover  {
+    border-color: #6366f1;
+    box-shadow: 0 4px 20px rgba(99,102,241,.25);
+  }
+  .card.sortable-ghost {
+    opacity: .35; border: 2px dashed #6366f1; background: #1e293b;
+  }
+  .card.sortable-chosen { box-shadow: 0 8px 32px rgba(0,0,0,.6); }
+  .card-title {
+    font-size: .87rem; font-weight: 600; color: #f1f5f9;
+    line-height: 1.4; word-break: break-word;
+  }
+  .card-desc {
+    font-size: .75rem; color: #64748b; margin-top: 5px;
+    line-height: 1.45; word-break: break-word;
+  }
+  .card-meta {
+    font-size: .68rem; color: #475569; margin-top: 8px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .card-actions { display: flex; gap: 6px; }
+  .btn-icon {
+    background: #1e293b; border: 1px solid #334155; color: #94a3b8;
+    border-radius: 6px; padding: 3px 7px; font-size: .7rem; cursor: pointer;
+    transition: background .15s;
+  }
+  .btn-icon:hover { background: #334155; color: #f1f5f9; }
+  .btn-icon.del:hover { background: #7f1d1d; border-color: #ef4444; color: #fca5a5; }
+
+  /* ── Spinner overlay ─────────────────────────────────────── */
+  .spinner-wrap {
+    position: fixed; inset: 0; background: rgba(0,0,0,.7);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 999; backdrop-filter: blur(3px);
+  }
+  .spinner {
+    width: 44px; height: 44px;
+    border: 4px solid #334155; border-top-color: #6366f1;
+    border-radius: 50%; animation: spin .8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── Modal ───────────────────────────────────────────────── */
+  .modal-backdrop {
+    position: fixed; inset: 0; background: rgba(0,0,0,.7);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 500; backdrop-filter: blur(4px);
+  }
+  .modal {
+    background: #1e293b; border: 1px solid #334155; border-radius: 16px;
+    padding: 28px; width: 400px; max-width: 95vw;
+    box-shadow: 0 24px 64px rgba(0,0,0,.6);
+  }
+  .modal h2 { font-size: 1.05rem; font-weight: 700; color: #f1f5f9; margin-bottom: 18px; }
+  .modal label { font-size: .78rem; color: #94a3b8; display: block; margin-bottom: 4px; }
+  .modal input, .modal textarea {
+    width: 100%; background: #0f172a; border: 1px solid #334155;
+    color: #f1f5f9; border-radius: 8px; padding: 9px 12px;
+    font-size: .85rem; margin-bottom: 14px; outline: none;
+    transition: border-color .15s;
+  }
+  .modal input:focus, .modal textarea:focus { border-color: #6366f1; }
+  .modal textarea { resize: vertical; min-height: 80px; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+  .btn-cancel {
+    background: #0f172a; border: 1px solid #334155; color: #94a3b8;
+    border-radius: 8px; padding: 8px 16px; cursor: pointer; font-size: .82rem;
+  }
+  .btn-submit {
+    background: linear-gradient(135deg,#6366f1,#8b5cf6);
+    border: none; color: #fff; border-radius: 8px;
+    padding: 8px 18px; cursor: pointer; font-size: .82rem; font-weight: 600;
+  }
+  .btn-submit:hover { opacity: .88; }
+
+  /* ── Toast ───────────────────────────────────────────────── */
+  #toast {
+    position: fixed; bottom: 24px; right: 24px; z-index: 1000;
+    background: #1e293b; border: 1px solid #334155;
+    color: #f1f5f9; padding: 10px 18px; border-radius: 10px;
+    font-size: .82rem; opacity: 0; pointer-events: none;
+    transition: opacity .3s; box-shadow: 0 8px 24px rgba(0,0,0,.4);
+  }
+  #toast.show { opacity: 1; }
+  #toast.ok   { border-color: #22c55e; }
+  #toast.err  { border-color: #ef4444; }
+
+  /* ── Empty state ─────────────────────────────────────────── */
+  .empty {
+    text-align: center; color: #475569; padding: 30px 14px;
+    font-size: .8rem; font-style: italic; user-select: none;
+  }
+</style>
+</head>
+<body>
+
+<!-- ── Spinner ──────────────────────────────────────────────── -->
+<div class="spinner-wrap" id="spinner">
+  <div class="spinner"></div>
+</div>
+
+<!-- ── Header ───────────────────────────────────────────────── -->
+<header>
+  <div class="logo">
+    <div class="logo-icon">🗂</div>
+    <div>
+      <h1>Kanban Board</h1>
+      <p>Collaborative · Real-Time</p>
+    </div>
+  </div>
+  <div class="header-right">
+    <div class="sync-badge">
+      <div class="sync-dot" id="sync-dot"></div>
+      <span id="sync-label">Syncing…</span>
+    </div>
+    <button id="add-task-btn">+ Add Task</button>
+  </div>
+</header>
+
+<!-- ── Board ─────────────────────────────────────────────────── -->
+<div class="board-wrapper">
+  <div class="board" id="board">
+
+    <div class="column" data-col="Backlog">
+      <div class="col-header">
+        <div class="col-dot backlog"></div>
+        <span class="col-title">Backlog</span>
+        <span class="col-count" id="cnt-Backlog">0</span>
+      </div>
+      <div class="cards-list" id="col-Backlog" data-status="Backlog"></div>
+    </div>
+
+    <div class="column" data-col="In-Progress">
+      <div class="col-header">
+        <div class="col-dot inprogress"></div>
+        <span class="col-title">In-Progress</span>
+        <span class="col-count" id="cnt-In-Progress">0</span>
+      </div>
+      <div class="cards-list" id="col-In-Progress" data-status="In-Progress"></div>
+    </div>
+
+    <div class="column" data-col="Done">
+      <div class="col-header">
+        <div class="col-dot done"></div>
+        <span class="col-title">Done</span>
+        <span class="col-count" id="cnt-Done">0</span>
+      </div>
+      <div class="cards-list" id="col-Done" data-status="Done"></div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ── Add / Edit Modal ──────────────────────────────────────── -->
+<div class="modal-backdrop" id="modal-backdrop" style="display:none">
+  <div class="modal">
+    <h2 id="modal-title">Add New Task</h2>
+    <label>Title *</label>
+    <input type="text" id="task-title" placeholder="What needs to be done?">
+    <label>Description</label>
+    <textarea id="task-desc" placeholder="Optional details…"></textarea>
+    <div class="modal-actions">
+      <button class="btn-cancel" id="modal-cancel">Cancel</button>
+      <button class="btn-submit" id="modal-submit">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Toast ─────────────────────────────────────────────────── -->
+<div id="toast"></div>
+
+<!-- ── Script ───────────────────────────────────────────────── -->
+<script>
+/* ── Local-mode shim (runs when opened as a plain HTML file) ─
+   Replaces google.script.run with an in-memory mock so the
+   board works for preview / demo without Apps Script.        */
+const IS_GAS = typeof google !== 'undefined' && google.script;
+
+if (!IS_GAS) {
+  // Seed in-memory DB
+  const _now = () => new Date().toISOString();
+  let _db = [
+    { id:'TASK-001', title:'Design UI Mockups',        description:'Create wireframes for the app',      status:'Backlog',     lastUpdated:_now() },
+    { id:'TASK-002', title:'Set up Google Sheets DB',  description:'Configure headers and schema',       status:'In-Progress', lastUpdated:_now() },
+    { id:'TASK-003', title:'Implement drag-and-drop',  description:'Use Sortable.js library',            status:'In-Progress', lastUpdated:_now() },
+    { id:'TASK-004', title:'Deploy Web App',           description:'Publish via Apps Script deploy',     status:'Done',        lastUpdated:_now() },
+    { id:'TASK-005', title:'Write documentation',      description:'README + system design explanation', status:'Backlog',     lastUpdated:_now() },
+  ];
+  // Build a chainable mock that calls success/failure handlers asynchronously
+  function _mock(fn) {
+    let _onSuccess = () => {}, _onFailure = () => {};
+    const chain = {
+      withSuccessHandler(h) { _onSuccess = h; return chain; },
+      withFailureHandler(h) { _onFailure = h; return chain; },
+    };
+    // Attach every server function as a no-op that triggers the chain
+    ['getTasks','getLastTimestamp','updateTaskStatus','addTask','editTask','deleteTask'].forEach(name => {
+      chain[name] = (...args) => {
+        setTimeout(() => {
+          try { _onSuccess(fn(name, args)); }
+          catch(e) { _onFailure(e); }
+        }, 180); // simulate ~180ms latency
+      };
+    });
+    return chain;
+  }
+
+  window.google = {
+    script: {
+      run: new Proxy({}, {
+        get(_, prop) {
+          return _mock((name, args) => {
+            // Route to the appropriate in-memory handler
+            if (name === 'getTasks') {
+              return JSON.stringify({ success:true, tasks: JSON.parse(JSON.stringify(_db)) });
+            }
+            if (name === 'getLastTimestamp') {
+              const ts = _db.reduce((m,t) => t.lastUpdated > m ? t.lastUpdated : m, '');
+              return JSON.stringify({ success:true, timestamp:ts });
+            }
+            if (name === 'updateTaskStatus') {
+              const [id, status] = args;
+              const t = _db.find(t => t.id === id);
+              if (!t) return JSON.stringify({ success:false, error:'Not found' });
+              t.status = status; t.lastUpdated = _now();
+              return JSON.stringify({ success:true, lastUpdated:t.lastUpdated });
+            }
+            if (name === 'addTask') {
+              const [title, desc] = args;
+              const id = 'TASK-' + Date.now();
+              const now = _now();
+              _db.push({ id, title, description:desc||'', status:'Backlog', lastUpdated:now });
+              return JSON.stringify({ success:true, id, lastUpdated:now });
+            }
+            if (name === 'editTask') {
+              const [id, title, desc] = args;
+              const t = _db.find(t => t.id === id);
+              if (!t) return JSON.stringify({ success:false, error:'Not found' });
+              t.title = title; t.description = desc||''; t.lastUpdated = _now();
+              return JSON.stringify({ success:true, lastUpdated:t.lastUpdated });
+            }
+            if (name === 'deleteTask') {
+              const [id] = args;
+              const idx = _db.findIndex(t => t.id === id);
+              if (idx === -1) return JSON.stringify({ success:false, error:'Not found' });
+              _db.splice(idx, 1);
+              return JSON.stringify({ success:true });
+            }
+            return JSON.stringify({ success:false, error:'Unknown function' });
+          })[prop];
+        }
+      })
+    }
+  };
+}
+
+/* ── State ────────────────────────────────────────────────── */
+let tasks        = [];          // local cache
+let lastTS       = '';          // last seen timestamp
+let polling      = null;        // setInterval handle
+let editTaskId   = null;        // null = add mode, else = edit mode
+let isBusy       = false;       // block overlapping writes
+const POLL_MS    = 4000;        // polling interval
+
+/* ── DOM refs ─────────────────────────────────────────────── */
+const spinner     = document.getElementById('spinner');
+const syncDot     = document.getElementById('sync-dot');
+const syncLabel   = document.getElementById('sync-label');
+const addBtn      = document.getElementById('add-task-btn');
+const modalBg     = document.getElementById('modal-backdrop');
+const modalTitle  = document.getElementById('modal-title');
+const titleInput  = document.getElementById('task-title');
+const descInput   = document.getElementById('task-desc');
+const modalCancel = document.getElementById('modal-cancel');
+const modalSubmit = document.getElementById('modal-submit');
+const toast       = document.getElementById('toast');
+
+/* ── Toast helper ─────────────────────────────────────────── */
+let toastTimer;
+function showToast(msg, type='ok') {
+  toast.textContent = msg;
+  toast.className   = 'show ' + type;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toast.className = '', 2800);
+}
+
+/* ── Spinner helpers ──────────────────────────────────────── */
+function showSpinner() { spinner.style.display = 'flex'; }
+function hideSpinner() { spinner.style.display = 'none'; }
+
+/* ── Format timestamp ─────────────────────────────────────── */
+function fmtTS(iso) {
+  if (!iso) return '';
+  try {
+    const d = new Date(iso);
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  } catch { return ''; }
+}
+
+/* ── Render board from local task cache ───────────────────── */
+function renderBoard() {
+  const cols = ['Backlog', 'In-Progress', 'Done'];
+  cols.forEach(s => {
+    const el = document.getElementById('col-' + s);
+    el.innerHTML = '';
+    const subset = tasks.filter(t => t.status === s);
+    document.getElementById('cnt-' + s).textContent = subset.length;
+    if (!subset.length) {
+      el.innerHTML = '<div class="empty">No tasks here</div>';
+      return;
+    }
+    subset.forEach(t => {
+      const card = document.createElement('div');
+      card.className    = 'card';
+      card.dataset.id   = t.id;
+      card.dataset.status = t.status;
+      card.innerHTML = `
+        <div class="card-title">${esc(t.title)}</div>
+        ${t.description ? `<div class="card-desc">${esc(t.description)}</div>` : ''}
+        <div class="card-meta">
+          <span>Updated ${fmtTS(t.lastUpdated)}</span>
+          <div class="card-actions">
+            <button class="btn-icon" onclick="openEdit('${t.id}')">✏️</button>
+            <button class="btn-icon del" onclick="handleDelete('${t.id}')">🗑</button>
+          </div>
+        </div>`;
+      el.appendChild(card);
+    });
+  });
+  initSortable();
+}
+
+/* ── HTML escape ──────────────────────────────────────────── */
+function esc(s) {
+  return String(s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+/* ── Sortable drag-and-drop ───────────────────────────────── */
+function initSortable() {
+  ['Backlog','In-Progress','Done'].forEach(s => {
+    const el = document.getElementById('col-' + s);
+    // destroy previous instance if any
+    if (el._sortable) el._sortable.destroy();
+    el._sortable = Sortable.create(el, {
+      group      : 'kanban',
+      animation  : 180,
+      ghostClass : 'sortable-ghost',
+      chosenClass: 'sortable-chosen',
+      filter     : '.empty,.btn-icon',   // don't drag on buttons
+      onEnd(evt) {
+        const cardEl   = evt.item;
+        const newStatus = evt.to.dataset.status;
+        const taskId   = cardEl.dataset.id;
+        if (!newStatus || !taskId) return;
+        if (cardEl.dataset.status === newStatus) return; // no change
+        handleMove(taskId, newStatus);
+      }
+    });
+  });
+}
+
+/* ── Load all tasks from server ───────────────────────────── */
+function loadTasks(isInitial) {
+  if (isInitial) showSpinner();
+  google.script.run
+    .withSuccessHandler(raw => {
+      hideSpinner();
+      try {
+        const res = JSON.parse(raw);
+        if (!res.success) throw new Error(res.error);
+        tasks  = res.tasks;
+        lastTS = latestTS(tasks);
+        renderBoard();
+        setSyncOk();
+      } catch(e) {
+        setSyncErr();
+        if (isInitial) showToast('Load failed: ' + e.message, 'err');
+      }
+    })
+    .withFailureHandler(e => {
+      hideSpinner();
+      setSyncErr();
+      if (isInitial) showToast('Load failed', 'err');
+    })
+    .getTasks();
+}
+
+/* ── Poll: check timestamp, reload only if changed ───────── */
+function pollChanges() {
+  google.script.run
+    .withSuccessHandler(raw => {
+      try {
+        const res = JSON.parse(raw);
+        if (!res.success) return setSyncErr();
+        setSyncOk();
+        if (res.timestamp && res.timestamp !== lastTS) {
+          loadTasks(false);     // data changed — re-fetch
+        }
+      } catch { setSyncErr(); }
+    })
+    .withFailureHandler(() => setSyncErr())
+    .getLastTimestamp();
+}
+
+/* ── Move a task (drag-drop or any column change) ─────────── */
+function handleMove(taskId, newStatus) {
+  if (isBusy) return;
+  isBusy = true;
+
+  // Optimistic update
+  const task = tasks.find(t => t.id === taskId);
+  const prevStatus = task ? task.status : null;
+  if (task) task.status = newStatus;
+  renderBoard();
+
+  google.script.run
+    .withSuccessHandler(raw => {
+      isBusy = false;
+      try {
+        const res = JSON.parse(raw);
+        if (!res.success) throw new Error(res.error);
+        if (task) task.lastUpdated = res.lastUpdated;
+        lastTS = latestTS(tasks);
+        renderBoard();
+        showToast('Task moved to ' + newStatus + ' ✓');
+      } catch(e) {
+        // rollback
+        if (task && prevStatus) task.status = prevStatus;
+        renderBoard();
+        showToast('Move failed: ' + e.message, 'err');
+      }
+    })
+    .withFailureHandler(e => {
+      isBusy = false;
+      if (task && prevStatus) task.status = prevStatus;
+      renderBoard();
+      showToast('Move failed', 'err');
+    })
+    .updateTaskStatus(taskId, newStatus);
+}
+
+/* ── Add task ─────────────────────────────────────────────── */
+function handleAdd(title, desc) {
+  google.script.run
+    .withSuccessHandler(raw => {
+      hideSpinner();
+      try {
+        const res = JSON.parse(raw);
+        if (!res.success) throw new Error(res.error);
+        tasks.push({ id: res.id, title, description: desc, status:'Backlog', lastUpdated: res.lastUpdated });
+        lastTS = latestTS(tasks);
+        renderBoard();
+        showToast('Task added ✓');
+      } catch(e) { showToast('Add failed: ' + e.message, 'err'); }
+    })
+    .withFailureHandler(() => { hideSpinner(); showToast('Add failed', 'err'); })
+    .addTask(title, desc);
+  showSpinner();
+}
+
+/* ── Edit task ────────────────────────────────────────────── */
+function handleEdit(taskId, title, desc) {
+  google.script.run
+    .withSuccessHandler(raw => {
+      hideSpinner();
+      try {
+        const res = JSON.parse(raw);
+        if (!res.success) throw new Error(res.error);
+        const t = tasks.find(t => t.id === taskId);
+        if (t) { t.title = title; t.description = desc; t.lastUpdated = res.lastUpdated; }
+        lastTS = latestTS(tasks);
+        renderBoard();
+        showToast('Task updated ✓');
+      } catch(e) { showToast('Edit failed: ' + e.message, 'err'); }
+    })
+    .withFailureHandler(() => { hideSpinner(); showToast('Edit failed', 'err'); })
+    .editTask(taskId, title, desc);
+  showSpinner();
+}
+
+/* ── Delete task ──────────────────────────────────────────── */
+function handleDelete(taskId) {
+  if (!confirm('Delete this task?')) return;
+  showSpinner();
+  google.script.run
+    .withSuccessHandler(raw => {
+      hideSpinner();
+      try {
+        const res = JSON.parse(raw);
+        if (!res.success) throw new Error(res.error);
+        tasks = tasks.filter(t => t.id !== taskId);
+        lastTS = latestTS(tasks);
+        renderBoard();
+        showToast('Task deleted');
+      } catch(e) { showToast('Delete failed: ' + e.message, 'err'); }
+    })
+    .withFailureHandler(() => { hideSpinner(); showToast('Delete failed', 'err'); })
+    .deleteTask(taskId);
+}
+
+/* ── Sync indicators ──────────────────────────────────────── */
+function setSyncOk() {
+  syncDot.className  = 'sync-dot';
+  syncLabel.textContent = 'Live · ' + new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+}
+function setSyncErr() {
+  syncDot.className  = 'sync-dot error';
+  syncLabel.textContent = 'Sync error';
+}
+
+/* ── Latest timestamp helper ──────────────────────────────── */
+function latestTS(arr) {
+  return arr.reduce((m, t) => t.lastUpdated > m ? t.lastUpdated : m, '');
+}
+
+/* ── Modal open/close ─────────────────────────────────────── */
+function openAdd() {
+  editTaskId    = null;
+  modalTitle.textContent = 'Add New Task';
+  modalSubmit.textContent = 'Add Task';
+  titleInput.value = '';
+  descInput.value  = '';
+  modalBg.style.display = 'flex';
+  titleInput.focus();
+}
+
+function openEdit(taskId) {
+  const task = tasks.find(t => t.id === taskId);
+  if (!task) return;
+  editTaskId    = taskId;
+  modalTitle.textContent = 'Edit Task';
+  modalSubmit.textContent = 'Save Changes';
+  titleInput.value = task.title;
+  descInput.value  = task.description;
+  modalBg.style.display = 'flex';
+  titleInput.focus();
+}
+
+function closeModal() {
+  modalBg.style.display = 'none';
+  editTaskId = null;
+}
+
+/* ── Modal events ─────────────────────────────────────────── */
+addBtn.addEventListener('click', openAdd);
+modalCancel.addEventListener('click', closeModal);
+modalBg.addEventListener('click', e => { if (e.target === modalBg) closeModal(); });
+
+modalSubmit.addEventListener('click', () => {
+  const title = titleInput.value.trim();
+  const desc  = descInput.value.trim();
+  if (!title) { showToast('Title is required', 'err'); titleInput.focus(); return; }
+  closeModal();
+  if (editTaskId) handleEdit(editTaskId, title, desc);
+  else            handleAdd(title, desc);
+});
+
+titleInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter') modalSubmit.click();
+  if (e.key === 'Escape') closeModal();
+});
+
+/* ── Keyboard shortcut: N = new task ─────────────────────── */
+document.addEventListener('keydown', e => {
+  if (e.key === 'n' && document.activeElement.tagName !== 'INPUT'
+                    && document.activeElement.tagName !== 'TEXTAREA') openAdd();
+});
+
+/* ── Boot ─────────────────────────────────────────────────── */
+loadTasks(true);
+polling = setInterval(pollChanges, POLL_MS);
+</script>
+</body>
+</html>
